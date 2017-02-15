@@ -7,38 +7,42 @@
 include_recipe "dokku::_nginx"
 include_recipe "openssl"
 
+package "wget"
 package "apt-transport-https"
 
 docker_service "default" do
   action [:create, :start]
 end
 
-packagecloud_repo "dokku/dokku" do
-  type "deb"
+template "/etc/apt/sources.list.d/dokku.list" do
+  source "apt.erb"
+  cookbook "dokku"
+  mode "0644"
+  variables :base_url     => "https://packagecloud.io/dokku/dokku/ubuntu/",
+            :distribution => "trusty",
+            :component    => "main"
+
+  notifies :run, "execute[apt-key-add-dokku]", :immediately
+  notifies :run, "execute[apt-get-update-dokku]", :immediately
 end
 
-execute "install-dokku-plugin-core-dependencies" do
-  command "dokku plugin:install-dependencies --core"
+execute "apt-key-add-dokku" do
+  command "wget --auth-no-challenge -qO - https://packagecloud.io/gpg.key | apt-key add -"
   action :nothing
 end
 
-%w(herokuish sshcommand plugn dokku).each do |pkg|
-  execute "hold-dependency-#{pkg}" do
-    command "apt-mark hold #{pkg}"
-    action :nothing
-  end
+execute "apt-get-update-dokku" do
+  command "apt-get update -o Dir::Etc::sourcelist=\"sources.list.d/dokku.list\"" \
+          " -o Dir::Etc::sourceparts=\"-\"" \
+          " -o APT::Get::List-Cleanup=\"0\""
+  action :nothing
+end
 
-  package pkg do
-    version node["dokku"]["package"][pkg]["version"]
+package "dokku"
 
-    if pkg == "dokku"
-      notifies :run,
-               "execute[install-dokku-plugin-core-dependencies]",
-               :immediately
-    end
-
-    notifies :run, "execute[hold-dependency-#{pkg}]", :immediately
-  end
+execute "install-dokku-plugin-core-dependencies" do
+  command "dokku plugin:install-dependencies --core"
+  action :run
 end
 
 file "/home/dokku/VHOST" do
